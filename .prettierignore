@@ -1,0 +1,12 @@
+# Generado o gestionado por herramientas
+.next/
+out/
+build/
+coverage/
+node_modules/
+next-env.d.ts
+package-lock.json
+*.tsbuildinfo
+
+# No tocar el formato de estos
+public/
