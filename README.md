@@ -29,13 +29,29 @@ Verifica tu versión con `node -v`.
 # 1. Instalar dependencias (también instala los hooks de Git vía `prepare`)
 npm install
 
-# 2. Arrancar el servidor de desarrollo
+# 2. Configurar las variables de entorno
+cp .env.example .env.local
+# Rellena .env.local con los valores de Supabase → Project Settings → API
+
+# 3. Arrancar el servidor de desarrollo
 npm run dev
 ```
 
 Abre [http://localhost:3000](http://localhost:3000).
 
 > Si clonas el repo y los hooks no se activan, ejecuta `npm run prepare` una vez.
+
+### Variables de entorno
+
+| Variable                        | De dónde sale                              |
+| ------------------------------- | ------------------------------------------ |
+| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase → Project Settings → API → URL    |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API → `anon` |
+
+Ambas son `NEXT_PUBLIC_`, o sea que viajan al navegador. Es lo correcto para la
+clave `anon`: quien protege los datos es **Row Level Security** en Supabase, no
+el secreto de la clave. Si algún día hace falta la `service_role`, va sin
+prefijo `NEXT_PUBLIC_` y solo se usa desde `server/`.
 
 ## Scripts
 
@@ -73,9 +89,12 @@ src/
 │   ├── ui/               Primitivas del design system (Button, Card, Sheet…)
 │   └── layout/           Estructura compartida (nav inferior, contenedores)
 ├── hooks/                Hooks genéricos, reutilizables entre features
-├── lib/                  Utilidades transversales (fechas, fetch, formateo)
+├── lib/
+│   ├── database.types.ts Tipos generados desde el esquema real de Supabase
+│   └── supabase/         Clientes de Supabase (ver abajo)
 ├── config/               Configuración estática de la app
-└── types/                Tipos compartidos entre features
+├── types/                Tipos compartidos entre features
+└── proxy.ts              Refresco de sesión en cada request
 ```
 
 Cada feature sigue la misma anatomía interna:
@@ -96,6 +115,57 @@ se importa siempre por el barrel** (`@/features/srs`), nunca un archivo interno.
 ESLint lo hace cumplir con `no-restricted-imports`.
 
 El alias `@/*` apunta a `src/*`.
+
+## Supabase
+
+Toda la configuración vive en `src/lib/supabase/`, con `@supabase/ssr`. Hay un
+cliente por entorno de ejecución porque cada uno accede a las cookies de forma
+distinta:
+
+| Archivo      | Dónde se usa                                      | Cómo se usa                                  |
+| ------------ | ------------------------------------------------- | -------------------------------------------- |
+| `client.ts`  | Client Components                                 | `createClient()` — síncrono, singleton       |
+| `server.ts`  | Server Components, Server Actions, Route Handlers | `await createClient()` — **uno por request** |
+| `session.ts` | Solo desde `src/proxy.ts`                         | `updateSession(request)`                     |
+| `env.ts`     | Interno                                           | Valida las variables con un error legible    |
+
+Los tres van tipados con `Database` de `src/lib/database.types.ts`, así que
+`supabase.from("learning_items").select()` devuelve filas tipadas y una tabla
+inexistente es un error de compilación.
+
+### Por qué hace falta el proxy
+
+Un Server Component **no puede escribir cookies**. Cuando el token de acceso
+caduca, alguien tiene que refrescarlo y guardar el nuevo antes de que se
+renderice la página; ese alguien es `src/proxy.ts`. Sin él aparecen deslogueos
+intermitentes difíciles de depurar.
+
+`server.ts` refleja eso: su `setAll` va envuelto en un `try/catch` porque en un
+Server Component la escritura lanza, y ahí es seguro ignorarla — el proxy ya se
+encargó.
+
+### `proxy.ts`, no `middleware.ts`
+
+En **Next.js 16 el convenio `middleware.ts` está deprecado y renombrado a
+`proxy.ts`**, con la función exportada llamada `proxy`. `middleware.ts` todavía
+funciona pero emite un aviso de deprecación en el build. La mayoría de guías de
+Supabase que encontrarás online siguen usando `middleware.ts`: son válidas en
+contenido, solo cambia el nombre del archivo y de la función.
+
+### Regenerar los tipos
+
+```bash
+npx supabase gen types typescript --linked > src/lib/database.types.ts
+```
+
+Es un archivo generado: está en `.prettierignore` y no se edita a mano.
+
+### Autorización
+
+El proxy **solo refresca la sesión**; no protege rutas. La comprobación de
+acceso va en los layouts de servidor y, sobre todo, en **Row Level Security** en
+Postgres. El proxy corre antes del render y puede desplegarse en un CDN, así que
+no es un sitio fiable para decidir quién ve qué.
 
 ## Tooling
 

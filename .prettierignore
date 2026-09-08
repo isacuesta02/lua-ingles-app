@@ -8,5 +8,12 @@ next-env.d.ts
 package-lock.json
 *.tsbuildinfo
 
+# Estado local del CLI de Supabase. Está en supabase/.gitignore, pero Prettier
+# solo lee el .gitignore de la raíz, no los anidados.
+supabase/.temp/
+
+# Tipos generados con `supabase gen types`: se regeneran, no se editan a mano.
+src/lib/database.types.ts
+
 # No tocar el formato de estos
 public/
