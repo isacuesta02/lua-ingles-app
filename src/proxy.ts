@@ -1,18 +1,57 @@
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
+import {
+  AFTER_LOGIN_PATH,
+  LOGIN_PATH,
+  isAuthPath,
+  isPublicPath,
+} from "@/lib/routes";
 import { updateSession } from "@/lib/supabase/session";
 
 /**
  * En Next.js 16 el convenio `middleware.ts` está **deprecado y renombrado a
  * `proxy.ts`**; la función exportada debe llamarse `proxy`.
  *
- * Aquí solo se refresca la sesión de Supabase. La protección de rutas conviene
- * hacerla en los layouts del servidor, no aquí: el proxy corre antes del render
- * y puede desplegarse en el CDN, así que no es el sitio para lógica de
- * autorización.
+ * Hace dos cosas: refrescar la sesión de Supabase y redirigir según haya token
+ * o no. Ojo: esto es comodidad de navegación, **no** el límite de seguridad. El
+ * guard de verdad está en `(protected)/layout.tsx` y, debajo, en las políticas
+ * RLS de Postgres.
  */
 export async function proxy(request: NextRequest) {
-  return await updateSession(request);
+  const { response, isAuthenticated } = await updateSession(request);
+  const { pathname } = request.nextUrl;
+
+  if (!isAuthenticated && !isPublicPath(pathname)) {
+    return redirectTo(LOGIN_PATH, request, response);
+  }
+
+  if (isAuthenticated && isAuthPath(pathname)) {
+    return redirectTo(AFTER_LOGIN_PATH, request, response);
+  }
+
+  return response;
+}
+
+/**
+ * Redirige conservando las cookies que `updateSession` acaba de escribir.
+ *
+ * Sin este traspaso se pierde el token recién refrescado y la siguiente request
+ * vuelve a refrescar — o directamente deja al usuario fuera.
+ */
+function redirectTo(
+  pathname: string,
+  request: NextRequest,
+  from: NextResponse,
+): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  url.search = "";
+
+  const redirectResponse = NextResponse.redirect(url);
+  for (const cookie of from.cookies.getAll()) {
+    redirectResponse.cookies.set(cookie);
+  }
+  return redirectResponse;
 }
 
 export const config = {

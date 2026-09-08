@@ -5,6 +5,13 @@ import type { Database } from "@/lib/database.types";
 
 import { supabaseEnv } from "./env";
 
+export type SessionResult = {
+  /** Respuesta con las cookies de sesión ya actualizadas. */
+  response: NextResponse;
+  /** `true` si la request llega con un token válido. */
+  isAuthenticated: boolean;
+};
+
 /**
  * Refresca el token de sesión y lo reescribe en las cookies de la respuesta.
  *
@@ -14,7 +21,7 @@ import { supabaseEnv } from "./env";
  */
 export async function updateSession(
   request: NextRequest,
-): Promise<NextResponse> {
+): Promise<SessionResult> {
   const { url, anonKey } = supabaseEnv();
 
   // Respuesta que se irá reconstruyendo si Supabase rota las cookies.
@@ -54,7 +61,7 @@ export async function updateSession(
   // dispara el refresco; si algo se ejecuta antes y falla, la sesión se pierde.
   // `getClaims()` verifica el JWT localmente cuando el proyecto usa claves
   // asimétricas, así que evita un viaje a la API de Auth en cada request.
-  await supabase.auth.getClaims();
+  const { data } = await supabase.auth.getClaims();
 
-  return response;
+  return { response, isAuthenticated: data?.claims != null };
 }
